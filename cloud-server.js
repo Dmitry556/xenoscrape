@@ -95,6 +95,7 @@ app.post('/api/scrape', async (req, res) => {
       block_assets: req.body.block_assets || ['image', 'font', 'media', 'stylesheet', 'analytics'],
       user_agent: req.body.user_agent || 'auto',
       priority: req.body.priority || 'normal',
+      extract_text: req.body.extract_text || false,
       created_at: new Date().toISOString(),
       idempotency_key: req.body.idempotency_key
     };

@@ -8,6 +8,7 @@ export interface ScrapeRequest {
   user_agent?: string;
   priority?: 'low' | 'normal' | 'high';
   idempotency_key?: string;
+  extract_text?: boolean; // New: return clean text instead of full HTML
 }
 
 export interface ScrapeResult {
@@ -16,7 +17,8 @@ export interface ScrapeResult {
   status_code: number;
   title: string;
   headers: Record<string, string>;
-  html_body: string;
+  html_body: string; // Contains either full HTML or clean text based on extract_text flag
+  text_content: string; // Always contains clean text extraction
   pdf_urls: string[];
   meta: {
     fetch_ms: number;
@@ -25,6 +27,7 @@ export interface ScrapeResult {
     render_js: boolean;
     bytes_rx: number;
     worker_id: string;
+    content_size: number; // Size of returned content
   };
 }
 

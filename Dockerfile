@@ -2,8 +2,8 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy and install dependencies first
-COPY cloud-package.json package.json
+# Copy package.json and install dependencies
+COPY package.json .
 RUN npm install --production
 
 # Copy server code

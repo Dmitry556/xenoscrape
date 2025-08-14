@@ -188,7 +188,10 @@ export class Scraper {
   }
 
   private extractTextFromHtml(html: string): string {
-    // Extract main content areas first
+    // First, extract navigation text separately
+    const navigationText = this.extractNavigationText(html);
+    
+    // Extract main content areas
     let contentHtml = html;
     
     // Try to find main content sections
@@ -205,17 +208,17 @@ export class Scraper {
       }
     }
     
-    // Remove unwanted sections
-    let text = contentHtml
+    // Remove unwanted sections (but keep navigation text separate)
+    let mainText = contentHtml
       .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Scripts
       .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '') // Styles
       .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '') // NoScript
-      .replace(/<(nav|header|footer|aside)[^>]*>[\s\S]*?<\/\1>/gi, '') // Navigation
+      .replace(/<(nav|header|footer|aside)[^>]*>[\s\S]*?<\/\1>/gi, '') // Remove nav from main content
       .replace(/<div[^>]*(?:class|id)="[^"]*(?:nav|header|footer|sidebar|ad|advertisement|cookie|popup|modal)[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '') // Ad/nav divs
       .replace(/<!--[\s\S]*?-->/g, ''); // Comments
     
-    // Convert to clean text
-    text = text
+    // Convert main content to clean text
+    mainText = mainText
       .replace(/<\/?(h[1-6]|p|div|li|br|blockquote|pre)\b[^>]*>/gi, '\n') // Block elements -> newlines
       .replace(/<\/?(strong|b|em|i|u|mark)\b[^>]*>/gi, '') // Keep emphasis content, remove tags
       .replace(/<[^>]+>/g, ' ') // All other tags -> spaces
@@ -227,15 +230,58 @@ export class Scraper {
       .replace(/\n{3,}/g, '\n\n') // Max 2 consecutive newlines
       .trim();
     
+    // Combine navigation and main content
+    let combinedText = '';
+    
+    if (navigationText.length > 0) {
+      combinedText += `NAVIGATION: ${navigationText}\n\n`;
+    }
+    
+    combinedText += mainText;
+    
     // Additional cleanup for common issues
-    text = text
-      .replace(/^[^\w]*|[^\w]*$/gm, '') // Remove non-word chars at line start/end
+    combinedText = combinedText
+      .replace(/^[^\w:]*|[^\w]*$/gm, '') // Remove non-word chars at line start/end (keep colons)
       .replace(/^\s*\n/gm, '') // Remove empty lines
       .replace(/(.)\1{4,}/g, '$1$1$1') // Reduce repeated chars (max 3)
       .trim();
     
     // Ensure minimum content length for validity
-    return text.length > 50 ? text : 'Content extraction failed - insufficient text content';
+    return combinedText.length > 50 ? combinedText : 'Content extraction failed - insufficient text content';
+  }
+
+  private extractNavigationText(html: string): string {
+    // Extract text from navigation elements
+    const navElements = [
+      /<nav[^>]*>([\s\S]*?)<\/nav>/gi,
+      /<header[^>]*>([\s\S]*?)<\/header>/gi,
+      /<div[^>]*(?:class|id)="[^"]*(?:nav|menu|navigation)[^"]*"[^>]*>([\s\S]*?)<\/div>/gi,
+      /<ul[^>]*(?:class|id)="[^"]*(?:nav|menu|navigation)[^"]*"[^>]*>([\s\S]*?)<\/ul>/gi
+    ];
+    
+    let navigationTexts: string[] = [];
+    
+    for (const regex of navElements) {
+      let match;
+      while ((match = regex.exec(html)) !== null) {
+        let navText = match[1]
+          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Remove scripts
+          .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '') // Remove styles
+          .replace(/<[^>]+>/g, ' ') // Remove all HTML tags
+          .replace(/&nbsp;/gi, ' ') // Non-breaking spaces
+          .replace(/&[a-zA-Z][a-zA-Z0-9]*;/g, ' ') // HTML entities
+          .replace(/\s+/g, ' ') // Collapse whitespace
+          .trim();
+        
+        if (navText.length > 5) { // Only include non-trivial navigation text
+          navigationTexts.push(navText);
+        }
+      }
+    }
+    
+    // Remove duplicates and combine
+    const uniqueNavTexts = [...new Set(navigationTexts)];
+    return uniqueNavTexts.join(' | ').trim();
   }
 
   private extractPdfUrls(html: string, baseUrl: string): string[] {
