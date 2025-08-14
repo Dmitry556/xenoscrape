@@ -97,20 +97,24 @@ export class Scraper {
 
         bytesReceived = responseSize || html.length;
 
+        // Extract clean text content
+        const cleanText = await this.extractCleanText(page, html);
+        
         // Extract PDF URLs
         const pdfUrls = this.extractPdfUrls(html, finalUrl);
 
         // Mark proxy success
         this.proxyManager.markSuccess(proxyUsed, Date.now() - startTime);
 
-        // Prepare result - ALWAYS return full HTML
+        // Prepare result with text extraction options
         const result: ScrapeResult = {
           url: request.url,
           final_url: finalUrl,
           status_code: statusCode,
           title,
           headers,
-          html_body: html, // Always return full HTML, let Clay handle size limits
+          html_body: request.extract_text ? cleanText : html, // Return clean text or full HTML
+          text_content: cleanText, // Always include clean text
           pdf_urls: pdfUrls,
           meta: {
             fetch_ms: Date.now() - startTime,
@@ -118,7 +122,8 @@ export class Scraper {
             proxy_used: `${proxyUsed.host}:${proxyUsed.port}`,
             render_js: request.render_js || false,
             bytes_rx: bytesReceived,
-            worker_id: this.workerId
+            worker_id: this.workerId,
+            content_size: request.extract_text ? cleanText.length : html.length
           }
         };
 
@@ -175,6 +180,62 @@ export class Scraper {
 
     console.error(`❌ Failed: ${request.url} after ${attempt - 1} attempts: ${errorMessage}`);
     throw new Error(`${errorCode}: ${errorMessage}`);
+  }
+
+  private async extractCleanText(page: Page, html: string): Promise<string> {
+    // Use robust HTML-based text extraction
+    return this.extractTextFromHtml(html);
+  }
+
+  private extractTextFromHtml(html: string): string {
+    // Extract main content areas first
+    let contentHtml = html;
+    
+    // Try to find main content sections
+    const mainContentRegex = /<(main|article|div[^>]*(?:class|id)="[^"]*(?:content|post|article|entry)[^"]*")[^>]*>([\s\S]*?)<\/\1>/gi;
+    let mainMatch = mainContentRegex.exec(html);
+    
+    if (mainMatch && mainMatch[2].length > 200) {
+      contentHtml = mainMatch[2];
+    } else {
+      // Fallback: extract body content
+      const bodyMatch = /<body[^>]*>([\s\S]*?)<\/body>/gi.exec(html);
+      if (bodyMatch) {
+        contentHtml = bodyMatch[1];
+      }
+    }
+    
+    // Remove unwanted sections
+    let text = contentHtml
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Scripts
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '') // Styles
+      .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '') // NoScript
+      .replace(/<(nav|header|footer|aside)[^>]*>[\s\S]*?<\/\1>/gi, '') // Navigation
+      .replace(/<div[^>]*(?:class|id)="[^"]*(?:nav|header|footer|sidebar|ad|advertisement|cookie|popup|modal)[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '') // Ad/nav divs
+      .replace(/<!--[\s\S]*?-->/g, ''); // Comments
+    
+    // Convert to clean text
+    text = text
+      .replace(/<\/?(h[1-6]|p|div|li|br|blockquote|pre)\b[^>]*>/gi, '\n') // Block elements -> newlines
+      .replace(/<\/?(strong|b|em|i|u|mark)\b[^>]*>/gi, '') // Keep emphasis content, remove tags
+      .replace(/<[^>]+>/g, ' ') // All other tags -> spaces
+      .replace(/&nbsp;/gi, ' ') // Non-breaking spaces
+      .replace(/&[a-zA-Z][a-zA-Z0-9]*;/g, ' ') // HTML entities
+      .replace(/&#[0-9]+;/g, ' ') // Numeric entities
+      .replace(/\s+/g, ' ') // Collapse whitespace
+      .replace(/\n\s+/g, '\n') // Clean line starts
+      .replace(/\n{3,}/g, '\n\n') // Max 2 consecutive newlines
+      .trim();
+    
+    // Additional cleanup for common issues
+    text = text
+      .replace(/^[^\w]*|[^\w]*$/gm, '') // Remove non-word chars at line start/end
+      .replace(/^\s*\n/gm, '') // Remove empty lines
+      .replace(/(.)\1{4,}/g, '$1$1$1') // Reduce repeated chars (max 3)
+      .trim();
+    
+    // Ensure minimum content length for validity
+    return text.length > 50 ? text : 'Content extraction failed - insufficient text content';
   }
 
   private extractPdfUrls(html: string, baseUrl: string): string[] {
